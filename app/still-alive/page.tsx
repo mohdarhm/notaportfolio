@@ -9,12 +9,12 @@ import { useEffect, useRef, useState } from "react";
 import AudioMotionAnalyzer from "audiomotion-analyzer";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUpRight, CloudLightning, List, VolumeX } from "react-feather";
+import { ArrowUpRight, CloudLightning, List, Pause, VolumeX } from "react-feather";
 import { Button, Image } from "@heroui/react"
 import { mobileVisOptions, visOptions } from "@/config/portal/visualizer";
-import { time } from "console";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); // helper
+const OFFSET = timelineEvents.find(e => e.mode === 'START_MUSIC')?.time || 0;
 
 export default function Portal() {
   const [isMobile, setIsMobile] = useState(false);
@@ -34,6 +34,9 @@ export default function Portal() {
   const animationFrameId = useRef<number>();
   const startTime = useRef<number>(0);
   const eventIndex = useRef<number>(0);
+
+  // ref to track where we left off
+  const musicProgress = useRef(0);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -72,34 +75,93 @@ export default function Portal() {
   /*
     THE FOLLOWING USEEFFECT IS OUR ROUTER. IT HAS TO ITERATE THROUGH ALL TIMELINE OBJECTS AND SCHEDULE THEM FOR EXECUTION
     IT DOESNT LOOP THROUGH IN THE TRADITIONAL SENSE. WE MAINTAIN A GLOBAL COUNTER OF WHERE WE ARE IN THE ARRAY
-  
-      00:10 -> requestAnimationFrame loop runs. It calculates elapsedTime is 100cs.
-      Router -> Checks timelineEvents. Finds an event at time 100: { text: "Hello", mode: "LYRIC_NEWLINE" }.
-      Router -> Adds this object to taskQueue state.
-      React -> Detects state change (taskQueue). Re-renders.
-      Consumer Effect -> Sees taskQueue has an item and isProcessing is false.
-      Consumer Effect -> Sets isProcessing = true. Calculates it needs to type 1 letter every 50ms.
-      Async Work -> Calls typeLyrics. The function types "H"... waits... "e"... waits... "l"...
-          Note: While this is happening, the Router loop is STILL running in the background tracking time, but it won't 
-          trigger the Consumer again because isProcessing is true.
-      Consumer Effect -> Typing finishes. Removes item from queue. Sets isProcessing = false.
-      React -> Re-renders. If the Router added another line while we were typing, the Consumer immediately picks it up now.
+
+    FRAME 0:
+
+    The browser paints and calls step(timestamp).
+    Let's say timestamp is 50000 (the browser has been open for 50 seconds).
+    startTime.current is 0, so it gets set to 50000. <- this choice here doesnt really matter.
+    elapsedTime = (50000 - 50000) / 10 = 0.
+    The Check: while (elapsedTime >= timelineEvents[0].time)
+        first event is at 0, then 0 >= 0 is True.
+
+    However, the second event is at 200ms, so 0 >= 200 is False.
+
+    So only the first event is processed, post which the function will be called and itll do nothing for some number
+    of iterations
+
+    Then, eventIndex.current increments to 1.
+    requestAnimationFrame(step) is called to queue the next frame.
+
+    Next event is at 200ms. By following the same logic we can see that:
+    Result: The step is skipped. No tasks added. requestAnimationFrame is called again - based on refresh rate, say after 16ms for 60Hz. or 6.94ms for 144Hz.
+
+    this will continue until enough time has elapsed that elapsedTime >= timelineEvents[eventIndex.current].time becomes true. We can actually calculate
+    the nth frame when this happens.
+
+    We know first event is 200ms. So we need elapsedTime >= 200.
+    for 144hz, frame time is ~6.94ms.
+
+    Lets say its Frame N:
+    
+    timestamp = 50000 + (N * 6.94)
+    elapsedTime = (timestamp - startTime.current) / 10
+    We want to find N such that:
+    (50000 + (N * 6.94) - 50000) / 10 >= 200
+    (N * 6.94) / 10 >= 200
+    N * 6.94 >= 2000
+    N >= 2000 / 6.94
+    N >= ~288.18
+
+    So at Frame 289 (approximately), the first event will be processed.
+    I think we can also verify this just by logging
    */
   useEffect(() => {
+    const a = document.getElementById('audio') as HTMLAudioElement
+
     if (!isPlaying) {
       if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
+      if (a) a.pause(); // SAVE OUR SPOT!
       return;
     }
+
+    if (a.currentTime > 0) {
+      // we must manually tell the audio to resume playing.
+      if (a.paused) {
+        a.play();
+      }
+      startVisualizer(a);
+
+      SetLogs(prev => [...prev, `Resuming audio playback at ${a.currentTime}s`])
+    }
+
 
     SetLogs(prev => [...prev, `Animation started. Identified ${timelineEvents.length} timeline events.`]);
 
     // the step function has to take timestamp arg here to calculate progression. otherwise the animation runs faster on high refresh rates.
     const step = (timestamp: number) => {
-      // for the first frame, current browser time is "zero"
+      if (!a) {
+        SetLogs(prev => [...prev, `Audio element not found, stopping animation.`])
+        setIsPlaying(false);
+        return;
+      }
+
       if (startTime.current === 0) startTime.current = timestamp;
+      if (!a.paused && !a.ended) {
+        const progress = a.currentTime * 1000; // this is self explanatory
+
+        // when the music starts, its time also starts from 0 which skews our calculations. we need to factor in the offset that is 
+        // the time difference between 0 and when music actually starts. currently this is done my looking at the time value of the 
+        // event where mode === 'START_MUSIC'
+        const offset = OFFSET * 10;
+        const expectedStartTime = timestamp - (progress + offset); // this should be accurate now
+
+        startTime.current = expectedStartTime;
+      }
 
       // the difference of current browser time and
       const elapsedTime = (timestamp - startTime.current) / 10; // convert to centi-seconds
+      musicProgress.current = elapsedTime; // continuously update music progress
 
       /* 
         We use a WHILE loop here, not an IF.
@@ -129,7 +191,7 @@ export default function Portal() {
             break;
 
           case 'START_MUSIC':
-            startVisualizer();
+            startVisualizer(a);
             break;
 
           case 'END':
@@ -212,7 +274,7 @@ export default function Portal() {
   }, [artTaskQueue, isProcessingArt]); // this dependency array ensures it runs when the artTaskQueue changes
 
   const typeLyrics = async (text: string, intervalMs: number, addNewline: boolean) => {
-
+    // TODO: this is an async function, that means this wont pause if isPlaying becomes false. we need to handle that. 
     SetLogs(prev => [...prev, `Typing lyrics: "${text}" with interval ${intervalMs.toFixed(2)}ms`])
     for (const char of text) {
       setDisplayedLyrics(prev => prev + char);
@@ -225,6 +287,8 @@ export default function Portal() {
   }
 
   const drawAsciiArt = async (artIndex: number) => {
+
+    // technically we should also "pause" here but ascii art is drawn pretty fast so its not very noticeable so we skip that for now.
     setCurrentAsciiArt("");
     const artToDraw = arts[artIndex];
     if (!artToDraw) return;
@@ -236,16 +300,15 @@ export default function Portal() {
     }
   }
 
-  const startVisualizer = async () => {
+  const startVisualizer = async (a: HTMLAudioElement) => {
     if (!containerRef.current || audioMotionRef.current) return;
 
     const audioMotion = new AudioMotionAnalyzer(containerRef.current, isMobile ? mobileVisOptions : visOptions);
 
-    const audioEl = document.getElementById("audio") as HTMLAudioElement;
-    if (audioEl) {
+    if (a) {
       SetLogs(prev => [...prev, `Starting audio playback..`])
-      audioMotion.connectInput(audioEl);
-      await audioEl.play();
+      audioMotion.connectInput(a);
+      await a.play();
     }
 
     audioMotionRef.current = audioMotion;
@@ -275,6 +338,14 @@ export default function Portal() {
     // this triggers our useEffect of the router. that means it starts what its doing that is populating the queues and stuff. 
     setIsPlaying(true);
   };
+
+  const handleMuteToggle = () => {
+    // there is only one audio element so we can just mute it directly.
+    if (audioRef.current) {
+      audioRef.current.muted = !audioRef.current.muted;
+
+    }
+  }
 
   if (!hasAudio) {
     return (
@@ -391,17 +462,52 @@ export default function Portal() {
             transition={{ duration: 0.6 }}
           >
 
-            <Button
-              onPress={() => { setShowModal(true) }}
-              className={clsx(
-                "p-4 rounded-full text-sm text-red-500 border-1 border-red-500 hover:bg-red-600 hover:text-white shadow-none bg-transparent tracking-tighter",
-                codestuff.className
-              )}
-              endContent={<ArrowUpRight size={15} className="text-red-500" />}
-              variant="shadow"
+            <motion.div
+              className="flex flex-wrap gap-3 justify-center w-full px-4 sm:px-0"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.1 }}
             >
-              {`Show ${logs.length} Logs`}
-            </Button>
+              <Button
+                onPress={() => { setShowModal(true) }}
+                className={clsx(
+                  "p-4 rounded-full text-sm text-red-500 border-1 border-red-500 hover:bg-red-600 hover:text-white shadow-none bg-transparent tracking-tighter",
+                  codestuff.className
+                )}
+                endContent={<ArrowUpRight size={15} className="text-red-500" />}
+                variant="shadow"
+              >
+                {`Show ${logs.length} Logs`}
+              </Button>
+
+              <Button
+                onPress={() => {
+                  setIsPlaying(!isPlaying)
+                  SetLogs(prev => [...prev, isPlaying ? `Pausing animation` : `Resuming animation`])
+                }}
+                className={clsx(
+                  "p-4 rounded-full text-sm text-orange-500 border-1 border-orange-500 hover:bg-orange-600 hover:text-white shadow-none bg-transparent tracking-tighter",
+                  codestuff.className
+                )}
+                endContent={<Pause size={15} className="text-orange-500" />}
+                variant="shadow"
+              >
+                {isPlaying ? "Pause" : "Play"}
+              </Button>
+
+              <Button
+                onPress={handleMuteToggle}
+                className={clsx(
+                  "p-4 rounded-full text-sm text-yellow-500 border-1 border-yellow-500 hover:bg-yellow-600 hover:text-white shadow-none bg-transparent tracking-tighter",
+                  codestuff.className
+                )}
+                endContent={<VolumeX size={15} className="text-yellow-500" />}
+                variant="shadow"
+              >
+                {""}
+              </Button>
+
+            </motion.div>
 
             <motion.div
               className="flex w-full flex-col gap-4 px-4 sm:px-0 sm:flex-row"

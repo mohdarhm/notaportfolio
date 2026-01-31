@@ -4,7 +4,7 @@
 
 export interface LyricLine {
     words: string | number; // The lyric line to display. if its a number then its ascii art index
-    time: number; // Time in milliseconds when this line should appear
+    time: number; // Time in centiseconds when this line should appear
     interval: number; // Duration to display the line (optional)
     mode: 'LYRIC_NEWLINE' | 'START_MUSIC' | 'DRAW_ART' | 'CLEAR_LYRICS' | 'LYRIC_NONEWLINE' | 'END'; // Mode of the line
 }
