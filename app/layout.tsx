@@ -17,11 +17,28 @@ import { Navbar } from "@/components/navbar";
 export const metadata: Metadata = {
   title: {
     default: siteConfig.name,
-    template: `%s - ${siteConfig.name}`,
+    template: `%s | ${siteConfig.name}`,
   },
   description: siteConfig.description,
   icons: {
     icon: fav.src,
+  },
+
+  openGraph: {
+    title: siteConfig.name,
+    description: siteConfig.description,
+    url: siteConfig.mainsite,
+    siteName: siteConfig.name,
+    images: [
+      {
+        url: `${siteConfig.mainsite}/og.png`,
+        width: 1200,
+        height: 630,
+        alt: siteConfig.name,
+      },
+    ],
+    locale: "en-IN",
+    type: "website",
   },
 };
 

@@ -446,7 +446,9 @@ export default function Portal() {
               </motion.div>
 
             </motion.div>
-
+<p className={clsx("text-3xl md:text-3xl font-black lg:text-4xl tracking-tighter break-words text-left px-3", nunito.className)}>
+              {"(click this image by the way ^^)"}
+            </p>
           </motion.div>
         )}
       </AnimatePresence>

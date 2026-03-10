@@ -1,9 +1,10 @@
 export type SiteConfig = typeof siteConfig;
 
 export const siteConfig = {
-  name: "imagine a cool name here",
-  description: "arhm's personal website",
-
+  name: "ARHM's SPACE",
+  description: "Arhm's personal space on a random server somewhere on the earth, where you will get to know me.",
+  mainsite: "https://space.arhm.dev",
+  
   navItems: [
     {
       label: "Home",
@@ -25,6 +26,10 @@ export const siteConfig = {
       label: "whoami",
       href: "/",
     },
+    {
+      label: "Blog",
+      href: "https://blog.arhm.dev",
+    }
   ],
 
   links: {
