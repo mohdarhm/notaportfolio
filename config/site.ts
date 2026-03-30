@@ -1,3 +1,5 @@
+import { Label } from "flowbite-react";
+
 export type SiteConfig = typeof siteConfig;
 
 export const siteConfig = {
@@ -29,6 +31,10 @@ export const siteConfig = {
     {
       label: "Blog",
       href: "https://blog.arhm.dev",
+    },
+    {
+      label:"Linux Probe",
+      href: "https://linux-hardware.org/?probe=11a5337a47"
     }
   ],
 
